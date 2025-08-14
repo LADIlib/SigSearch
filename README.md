@@ -37,6 +37,22 @@ this can be compiled into
 ```
 when decompiling in IDA
 
+### What’s the difference?
+In other implementations of similar libraries, there are often several problems:
+- Signature parsing is done at runtime instead of compile time
+- Memory is allocated during signature parsing (often dynamically)
+- Signature search is performed linearly using two loops
+- There is no ability to search for multiple signatures at once using a single common loop
+
+Summing up the above issues: for a large number of signatures and a wide search range, other solutions can become a bottleneck in the logic... Initialization, search, and usage speed will be extremely low.
+
+In this implementation, these problems are solved. Key features:
+- Signatures are parsed at compile time and do not allocate memory (neither dynamic nor static)
+- You can search for a single signature, any one of several, or all of them at once
+- Thanks to compile-time signature parsing, it is possible to unroll the second `for` loop for signature comparison. Instead of a loop, a block of `if()` statements will be compiled, which significantly reduces the number of CPU instructions and RAM access needed to compare memory and signatures.
+
+Combined with the above advantages, searching for multiple signatures at once will be extremely fast (`SigSearch::FindAllInRange`).
+
 ### Requirements
 - C++20 or newer. If you compile with C++23 and the standard `std::bitset` is available, the header uses it; otherwise it contains a lightweight bitset implementation.
 
@@ -50,13 +66,13 @@ int main() {
     auto sig = "48 8B ?? 89"_sig;
     uintptr_t found = SigSearch::FindSignatureInRange(startAddr, endAddr, sig);
 
-    // Multiple signature search
+    // One-of signature search
     auto sig1 = "48 8B ?? 89"_sig;
     auto sig2 = "90 90 90"_sig;
     uintptr_t foundAny = SigSearch::FindAnyInRange(startAddr, endAddr, sig1, sig2);
 
-    // Find all matches for one or more signatures
-    auto results = SigSearch::FindAllInRange(startAddr, endAddr, sig1);
+    // Find first matches for one or more signatures
+    auto results = SigSearch::FindAllInRange(startAddr, endAddr, sig, sig1, sig2);
     for (auto addr : results) {
         if (addr) {
             // Do something with match
@@ -68,9 +84,9 @@ int main() {
 ### API (short)
 - `Signature<"..">` / `".."_sig` — compile-time signature object.
 - `Signature::MatchAt(uintptr_t addr)` — check if signature matches at address.
-- `FindSignatureInRange(start,end,sig)` — returns first address or 0.
-- `FindAnyInRange(start,end,sig1,sig2,...)` — returns first address where any of signatures match.
-- `FindAllInRange(start,end,sig1,sig2,...)` — returns `std::array<uintptr_t, N>` with found addresses (0 if not found).
+- `FindSignatureInRange(uintptr_t start,uintptr_t end,sig)` — returns first address or 0.
+- `FindAnyInRange(uintptr_t start,uintptr_t end, sig1,sig2,...)` — returns first address where any of signatures match.
+- `FindAllInRange(uintptr_t start,uintptr_t end, sig1,sig2,...)` — returns `std::array<uintptr_t, N>` with found addresses (0 if not found).
 
 ### Notes & limitations
 - The header works on raw memory reads; ensure you have permission to read the memory range.
@@ -115,6 +131,23 @@ int main()
 ```
 при декомпиляции в IDA
 
+### В чем отличия?
+В других реализациях подобных библиотек зачастую есть несколько проблем:
+- парсинг сигнатур не во время компиляции, а в рантайме
+- при парсинге сигнатур выделяется память (зачастую динамическая)
+- поиск сигнатур происходит линейно с использованием двух циклов
+- нет возможности искать сразу несколько сигнатур используя один общий цикл
+
+Подытоживая вышеперечиленные проблемы, для большого количества сигнатур и большого диапазона поиска - другие решения могут стать узким местом в логике... Скорость инициализации, поиска и использования будет крайне низкой
+
+
+В этой библиотеке эти проблемы решены, ключевые особенности:
+- сигнатура парсится во время компиляции и не выделяет память (ни динамическую, ни статическую)
+- есть возможность искать как одну сигнатуру, так и одну из нескольких, так и сразу несколько
+- за счет парсинга сигнатур во время компиляции - появилась возможность развернуть второй цикл `for` для сравнения сигнатур, вместо цикла будет компилироваться блок `if()`, что существенно снижет количество команд для процессора и доступа к памяти для сравнения памяти и сигнатур
+
+В купе с вышеперечисленными преимуществами поиск сразу нескольких сигнатур одновременно будет крайне быстрым (`SigSearch::FindAllInRange`)
+
 ### Требования
 - Компилятор с поддержкой C++20 или новее.
 
@@ -125,7 +158,7 @@ using namespace SigSearch::literals;
 
 int main() {
     // Поиск одной сигнатуры
-    auto sig = "48 8B ?? 89"_sig;
+    auto sig = "12 ?? E8"_sig;
     uintptr_t found = SigSearch::FindSignatureInRange(startAddr, endAddr, sig);
 
     // Поиск любой из нескольких сигнатур
@@ -133,8 +166,8 @@ int main() {
     auto sig2 = "90 90 90"_sig;
     uintptr_t foundAny = SigSearch::FindAnyInRange(startAddr, endAddr, sig1, sig2);
 
-    // Поиск всех совпадений для одной сигнатуры
-    auto results = SigSearch::FindAllInRange(startAddr, endAddr, sig1);
+    // Поиск совпадений для одной и более сигнатур сигнатуры
+    auto results = SigSearch::FindAllInRange(startAddr, endAddr, sig, sig1, sig2);
     for (auto addr : results) {
         if (addr) {
             // Обработка найденного адреса
