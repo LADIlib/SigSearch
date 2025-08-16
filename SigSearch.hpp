@@ -22,529 +22,7 @@
 #error "A C++ compiler is required" 
 #endif // CPP_VERSION
 
-#if CPP_VERSION >= 202302L  // c++23
-#include <bitset>
-template<size_t _Bits>
-using _BitSetClass = std::bitset<_Bits>;
-#elif CPP_VERSION >= 202002L // c++20
-#include <bit>
-namespace nstd {
-
-    template <size_t _Bits>
-    class bitset {  // store fixed-length sequence of Boolean elements
-    public:
-#pragma warning(push)
-#pragma warning(disable : 4296)  // expression is always true (/Wall)
-        using _Ty = std::conditional_t<_Bits <= sizeof(unsigned long) * CHAR_BIT, unsigned long, unsigned long long>;
-#pragma warning(pop)
-
-        class reference {  // proxy for an element
-            friend bitset<_Bits>;
-
-        public:
-            constexpr ~reference() noexcept {}  // TRANSITION, ABI
-
-            constexpr reference& operator=(bool _Val) noexcept {
-                _Pbitset->_Set_unchecked(_Mypos, _Val);
-                return *this;
-            }
-
-            constexpr reference& operator=(const reference& _Bitref) noexcept {
-                _Pbitset->_Set_unchecked(_Mypos, static_cast<bool>(_Bitref));
-                return *this;
-            }
-
-            constexpr reference& flip() noexcept {
-                _Pbitset->_Flip_unchecked(_Mypos);
-                return *this;
-            }
-
-            constexpr bool operator~() const noexcept {
-                return !_Pbitset->_Subscript(_Mypos);
-            }
-
-            constexpr operator bool() const noexcept {
-                return _Pbitset->_Subscript(_Mypos);
-            }
-
-        private:
-            constexpr reference() noexcept : _Pbitset(nullptr), _Mypos(0) {}
-
-            constexpr reference(bitset<_Bits>& _Bitset, size_t _Pos) : _Pbitset(&_Bitset), _Mypos(_Pos) {}
-
-            bitset<_Bits>* _Pbitset;
-            size_t _Mypos;  // position of element in bitset
-        };
-
-        static constexpr void _Validate(size_t _Pos) {  // verify that _Pos is within bounds
-            assert(_Pos < _Bits && "bitset index outside range");
-        }
-
-        constexpr bool _Subscript(size_t _Pos) const {
-            return (_Array[_Pos / _Bitsperword] & (_Ty{ 1 } << _Pos % _Bitsperword)) != 0;
-        }
-
-        constexpr bool operator[](size_t _Pos) const {
-            _Validate(_Pos);
-            return _Subscript(_Pos);
-        }
-
-        constexpr reference operator[](size_t _Pos) {
-            _Validate(_Pos);
-            return reference(*this, _Pos);
-        }
-
-        constexpr bitset() noexcept : _Array() {}  // construct with all false values
-
-        static constexpr bool _Need_mask = _Bits < CHAR_BIT * sizeof(unsigned long long);
-
-        static constexpr unsigned long long _Mask = (1ULL << (_Need_mask ? _Bits : 0)) - 1ULL;
-
-        constexpr bitset(unsigned long long _Val) noexcept : _Array{ static_cast<_Ty>(_Need_mask ? _Val & _Mask : _Val) } {}
-
-        template <class _Traits, class _Elem>
-        constexpr void _Construct(const _Elem* const _Ptr, size_t _Count, const _Elem _Elem0, const _Elem _Elem1) {
-            if (_Count > _Bits) {
-                for (size_t _Idx = _Bits; _Idx < _Count; ++_Idx) {
-                    const auto _Ch = _Ptr[_Idx];
-                    if (!_Traits::eq(_Elem1, _Ch) && !_Traits::eq(_Elem0, _Ch)) {
-                        _Xinv();
-                    }
-                }
-
-                _Count = _Bits;
-            }
-
-            size_t _Wpos = 0;
-            if (_Count != 0) {
-                size_t _Bits_used_in_word = 0;
-                auto _Last = _Ptr + _Count;
-                _Ty _This_word = 0;
-                do {
-                    --_Last;
-                    const auto _Ch = *_Last;
-                    _This_word |= static_cast<_Ty>(_Traits::eq(_Elem1, _Ch)) << _Bits_used_in_word;
-                    if (!_Traits::eq(_Elem1, _Ch) && !_Traits::eq(_Elem0, _Ch)) {
-                        _Xinv();
-                    }
-
-                    if (++_Bits_used_in_word == _Bitsperword) {
-                        _Array[_Wpos] = _This_word;
-                        ++_Wpos;
-                        _This_word = 0;
-                        _Bits_used_in_word = 0;
-                    }
-                } while (_Ptr != _Last);
-
-                if (_Bits_used_in_word != 0) {
-                    _Array[_Wpos] = _This_word;
-                    ++_Wpos;
-                }
-            }
-
-            for (; _Wpos <= _Words; ++_Wpos) {
-                _Array[_Wpos] = 0;
-            }
-        }
-
-        template <class _Elem, class _Traits, class _Alloc>
-        constexpr explicit bitset(
-            const std::basic_string<_Elem, _Traits, _Alloc>& _Str,
-            typename std::basic_string<_Elem, _Traits, _Alloc>::size_type _Pos = 0,
-            typename std::basic_string<_Elem, _Traits, _Alloc>::size_type _Count = std::basic_string<_Elem, _Traits, _Alloc>::npos,
-            _Elem _Elem0 = static_cast<_Elem>('0'),
-            _Elem _Elem1 = static_cast<_Elem>('1')) {
-            // construct from [_Pos, _Pos + _Count) elements in string
-            if (_Str.size() < _Pos) {
-                _Xran();  // _Pos off end
-            }
-
-            if (_Str.size() - _Pos < _Count) {
-                _Count = _Str.size() - _Pos;  // trim _Count to size
-            }
-
-            _Construct<_Traits>(_Str.data() + _Pos, _Count, _Elem0, _Elem1);
-        }
-
-        template <class _Elem>
-        constexpr explicit bitset(const _Elem* _Ntcts,
-            typename std::basic_string<_Elem>::size_type _Count = std::basic_string<_Elem>::npos,
-            _Elem _Elem0 = static_cast<_Elem>('0'),
-            _Elem _Elem1 = static_cast<_Elem>('1')) {
-            if (_Count == std::basic_string<_Elem>::npos) {
-                _Count = std::char_traits<_Elem>::length(_Ntcts);
-            }
-
-            _Construct<std::char_traits<_Elem>>(_Ntcts, _Count, _Elem0, _Elem1);
-        }
-
-        constexpr bitset& operator&=(const bitset& _Right) noexcept {
-            for (size_t _Wpos = 0; _Wpos <= _Words; ++_Wpos) {
-                _Array[_Wpos] &= _Right._Array[_Wpos];
-            }
-
-            return *this;
-        }
-
-        constexpr bitset& operator|=(const bitset& _Right) noexcept {
-            for (size_t _Wpos = 0; _Wpos <= _Words; ++_Wpos) {
-                _Array[_Wpos] |= _Right._Array[_Wpos];
-            }
-
-            return *this;
-        }
-
-        constexpr bitset& operator^=(const bitset& _Right) noexcept {
-            for (size_t _Wpos = 0; _Wpos <= _Words; ++_Wpos) {
-                _Array[_Wpos] ^= _Right._Array[_Wpos];
-            }
-
-            return *this;
-        }
-
-        constexpr bitset& operator<<=(size_t _Pos) noexcept {  // shift left by _Pos, first by words then by bits
-            const auto _Wordshift = static_cast<ptrdiff_t>(_Pos / _Bitsperword);
-            if (_Wordshift != 0) {
-                for (ptrdiff_t _Wpos = _Words; 0 <= _Wpos; --_Wpos) {
-                    _Array[_Wpos] = _Wordshift <= _Wpos ? _Array[_Wpos - _Wordshift] : 0;
-                }
-            }
-
-            if ((_Pos %= _Bitsperword) != 0) {  // 0 < _Pos < _Bitsperword, shift by bits
-                for (ptrdiff_t _Wpos = _Words; 0 < _Wpos; --_Wpos) {
-                    _Array[_Wpos] = (_Array[_Wpos] << _Pos) | (_Array[_Wpos - 1] >> (_Bitsperword - _Pos));
-                }
-
-                _Array[0] <<= _Pos;
-            }
-            _Trim();
-            return *this;
-        }
-
-        constexpr bitset& operator>>=(size_t _Pos) noexcept {  // shift right by _Pos, first by words then by bits
-            const auto _Wordshift = static_cast<ptrdiff_t>(_Pos / _Bitsperword);
-            if (_Wordshift != 0) {
-                for (ptrdiff_t _Wpos = 0; _Wpos <= _Words; ++_Wpos) {
-                    _Array[_Wpos] = _Wordshift <= _Words - _Wpos ? _Array[_Wpos + _Wordshift] : 0;
-                }
-            }
-
-            if ((_Pos %= _Bitsperword) != 0) {  // 0 < _Pos < _Bitsperword, shift by bits
-                for (ptrdiff_t _Wpos = 0; _Wpos < _Words; ++_Wpos) {
-                    _Array[_Wpos] = (_Array[_Wpos] >> _Pos) | (_Array[_Wpos + 1] << (_Bitsperword - _Pos));
-                }
-
-                _Array[_Words] >>= _Pos;
-            }
-            return *this;
-        }
-
-        constexpr bitset& set() noexcept {  // set all bits true
-            //for (size_t _Wpos = 0; _Wpos <= _Words; ++_Wpos) {
-            //    _Array[_Wpos] = std::numeric_limits<_Ty>::;
-            //}
-            std::memset(&_Array, 0xFF, sizeof(_Array));
-
-            _Trim();
-            return *this;
-        }
-
-        constexpr bitset& set(size_t _Pos, bool _Val = true) {  // set bit at _Pos to _Val
-            if (_Bits <= _Pos) {
-                _Xran();  // _Pos off end
-            }
-
-            return _Set_unchecked(_Pos, _Val);
-        }
-
-        constexpr bitset& reset() noexcept {  // set all bits false
-            for (size_t _Wpos = 0; _Wpos <= _Words; ++_Wpos) {
-                _Array[_Wpos] = 0;
-            }
-            // std::memset(&_Array, 0, sizeof(_Array));
-
-            return *this;
-        }
-
-        constexpr bitset& reset(size_t _Pos) {  // set bit at _Pos to false
-            return set(_Pos, false);
-        }
-
-        constexpr bitset operator~() const noexcept {  // flip all bits
-            bitset _Tmp = *this;
-            _Tmp.flip();
-            return _Tmp;
-        }
-
-        constexpr bitset& flip() noexcept {  // flip all bits
-            for (size_t _Wpos = 0; _Wpos <= _Words; ++_Wpos) {
-                _Array[_Wpos] = ~_Array[_Wpos];
-            }
-
-            _Trim();
-            return *this;
-        }
-
-        constexpr bitset& flip(size_t _Pos) {  // flip bit at _Pos
-            if (_Bits <= _Pos) {
-                _Xran();  // _Pos off end
-            }
-
-            return _Flip_unchecked(_Pos);
-        }
-
-        constexpr unsigned long to_ulong() const {
-            constexpr bool _Bits_zero = _Bits == 0;
-            constexpr bool _Bits_small = _Bits <= 32;
-            constexpr bool _Bits_large = _Bits > 64;
-            if constexpr (_Bits_zero) {
-                return 0;
-            }
-            else if constexpr (_Bits_small) {
-                return static_cast<unsigned long>(_Array[0]);
-            }
-            else {
-                if constexpr (_Bits_large) {
-                    for (size_t _Idx = 1; _Idx <= _Words; ++_Idx) {
-                        if (_Array[_Idx] != 0) {
-                            _Xoflo();  // fail if any high-order words are nonzero
-                        }
-                    }
-                }
-
-                if (_Array[0] > ULONG_MAX) {
-                    _Xoflo();
-                }
-
-                return static_cast<unsigned long>(_Array[0]);
-            }
-        }
-
-        constexpr unsigned long long to_ullong() const {
-            constexpr bool _Bits_zero = _Bits == 0;
-            constexpr bool _Bits_large = _Bits > 64;
-            if constexpr (_Bits_zero) {
-                return 0;
-            }
-            else {
-                if constexpr (_Bits_large) {
-                    for (size_t _Idx = 1; _Idx <= _Words; ++_Idx) {
-                        if (_Array[_Idx] != 0) {
-                            _Xoflo();  // fail if any high-order words are nonzero
-                        }
-                    }
-                }
-
-                return _Array[0];
-            }
-        }
-
-        template <class _Elem = char, class _Tr = std::char_traits<_Elem>, class _Alloc = std::allocator<_Elem>>
-        constexpr std::basic_string<_Elem, _Tr, _Alloc> to_string(_Elem _Elem0 = static_cast<_Elem>('0'),
-            _Elem _Elem1 = static_cast<_Elem>('1')) const {
-            // convert bitset to string
-            std::basic_string<_Elem, _Tr, _Alloc> _Str;
-            _Str.reserve(_Bits);
-
-            for (auto _Pos = _Bits; 0 < _Pos;) {
-                _Str.push_back(_Subscript(--_Pos) ? _Elem1 : _Elem0);
-            }
-
-            return _Str;
-        }
-
-        constexpr size_t count() const noexcept {  // count number of set bits
-            size_t result = 0;
-            for (size_t _Wpos = 0; _Wpos <= _Words; ++_Wpos) {
-                result += std::popcount(_Array[_Wpos]);
-            }
-
-            return result;
-            // const char* const _Bitsperbyte = "\0\1\1\2\1\2\2\3\1\2\2\3\2\3\3\4"
-            //                                 "\1\2\2\3\2\3\3\4\2\3\3\4\3\4\4\5"
-            //                                 "\1\2\2\3\2\3\3\4\2\3\3\4\3\4\4\5"
-            //                                 "\2\3\3\4\3\4\4\5\3\4\4\5\4\5\5\6"
-            //                                 "\1\2\2\3\2\3\3\4\2\3\3\4\3\4\4\5"
-            //                                 "\2\3\3\4\3\4\4\5\3\4\4\5\4\5\5\6"
-            //                                 "\2\3\3\4\3\4\4\5\3\4\4\5\4\5\5\6"
-            //                                 "\3\4\4\5\4\5\5\6\4\5\5\6\5\6\6\7"
-            //                                 "\1\2\2\3\2\3\3\4\2\3\3\4\3\4\4\5"
-            //                                 "\2\3\3\4\3\4\4\5\3\4\4\5\4\5\5\6"
-            //                                 "\2\3\3\4\3\4\4\5\3\4\4\5\4\5\5\6"
-            //                                 "\3\4\4\5\4\5\5\6\4\5\5\6\5\6\6\7"
-            //                                 "\2\3\3\4\3\4\4\5\3\4\4\5\4\5\5\6"
-            //                                 "\3\4\4\5\4\5\5\6\4\5\5\6\5\6\6\7"
-            //                                 "\3\4\4\5\4\5\5\6\4\5\5\6\5\6\6\7"
-            //                                 "\4\5\5\6\5\6\6\7\5\6\6\7\6\7\7\x8";
-            // const unsigned char* _Ptr       = &reinterpret_cast<const unsigned char&>(_Array);
-            // const unsigned char* const _End = _Ptr + sizeof(_Array);
-            // size_t _Val                     = 0;
-            // for (; _Ptr != _End; ++_Ptr) {
-            //    _Val += _Bitsperbyte[*_Ptr];
-            //}
-
-            // return _Val;
-        }
-
-        constexpr size_t size() const noexcept {
-            return _Bits;
-        }
-
-        constexpr bool operator==(const bitset& _Right) const noexcept {
-            for (size_t _Wpos = 0; _Wpos <= _Words; ++_Wpos) {
-                if (_Array[_Wpos] != _Right._Array[_Wpos]) {
-                    return false;
-                }
-            }
-            return true;
-            // return std::memcmp(&_Array[0], &_Right._Array[0], sizeof(_Array)) == 0;
-        }
-
-#if !_HAS_CXX20
-        constexpr bool operator!=(const bitset& _Right) const noexcept {
-            return !(*this == _Right);
-        }
-#endif  // !_HAS_CXX20
-
-        constexpr bool test(size_t _Pos) const {
-            if (_Bits <= _Pos) {
-                _Xran();  // _Pos off end
-            }
-
-            return _Subscript(_Pos);
-        }
-
-        constexpr bool any() const noexcept {
-            for (size_t _Wpos = 0; _Wpos <= _Words; ++_Wpos) {
-                if (_Array[_Wpos] != 0) {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        constexpr bool none() const noexcept {
-            return !any();
-        }
-
-        constexpr bool all() const noexcept {
-            constexpr bool _Zero_length = _Bits == 0;
-            if constexpr (_Zero_length) {  // must test for this, otherwise would count one full word
-                return true;
-            }
-
-            constexpr bool _No_padding = _Bits % _Bitsperword == 0;
-            for (size_t _Wpos = 0; _Wpos < _Words + _No_padding; ++_Wpos) {
-                if (_Array[_Wpos] != ~static_cast<_Ty>(0)) {
-                    return false;
-                }
-            }
-
-            return _No_padding || _Array[_Words] == (static_cast<_Ty>(1) << (_Bits % _Bitsperword)) - 1;
-        }
-
-        constexpr bitset operator<<(size_t _Pos) const noexcept {
-            bitset _Tmp = *this;
-            _Tmp <<= _Pos;
-            return _Tmp;
-        }
-
-        constexpr bitset operator>>(size_t _Pos) const noexcept {
-            bitset _Tmp = *this;
-            _Tmp >>= _Pos;
-            return _Tmp;
-        }
-
-        constexpr _Ty _Getword(size_t _Wpos) const noexcept {  // nonstandard extension; get underlying word
-            return _Array[_Wpos];
-        }
-
-    private:
-        friend std::hash<bitset<_Bits>>;
-
-        static constexpr ptrdiff_t _Bitsperword = CHAR_BIT * sizeof(_Ty);
-        static constexpr ptrdiff_t _Words = _Bits == 0 ? 0 : (_Bits - 1) / _Bitsperword;  // NB: number of words - 1
-
-        constexpr void _Trim() noexcept {  // clear any trailing bits in last word
-            constexpr bool _Work_to_do = _Bits == 0 || _Bits % _Bitsperword != 0;
-            if constexpr (_Work_to_do) {
-                _Array[_Words] &= (_Ty{ 1 } << _Bits % _Bitsperword) - 1;
-            }
-        }
-
-        constexpr bitset& _Set_unchecked(size_t _Pos, bool _Val) noexcept {  // set bit at _Pos to _Val, no checking
-            auto& _Selected_word = _Array[_Pos / _Bitsperword];
-            const auto _Bit = _Ty{ 1 } << _Pos % _Bitsperword;
-            if (_Val) {
-                _Selected_word |= _Bit;
-            }
-            else {
-                _Selected_word &= ~_Bit;
-            }
-
-            return *this;
-        }
-
-        constexpr bitset& _Flip_unchecked(size_t _Pos) noexcept {  // flip bit at _Pos, no checking
-            _Array[_Pos / _Bitsperword] ^= _Ty{ 1 } << _Pos % _Bitsperword;
-            return *this;
-        }
-
-        [[noreturn]] constexpr void _Xinv() const {
-            throw std::invalid_argument("invalid bitset char");
-        }
-
-        [[noreturn]] constexpr void _Xoflo() const {
-            throw std::overflow_error("bitset overflow");
-        }
-
-        [[noreturn]] constexpr void _Xran() const {
-            throw std::out_of_range("invalid bitset position");
-        }
-
-        _Ty _Array[_Words + 1];
-    };
-
-    template <size_t _Bits>
-    constexpr bitset<_Bits> operator&(const bitset<_Bits>& _Left, const bitset<_Bits>& _Right) noexcept {
-        bitset<_Bits> _Ans = _Left;
-        _Ans &= _Right;
-        return _Ans;
-    }
-
-    template <size_t _Bits>
-    constexpr bitset<_Bits> operator|(const bitset<_Bits>& _Left, const bitset<_Bits>& _Right) noexcept {
-        bitset<_Bits> _Ans = _Left;
-        _Ans |= _Right;
-        return _Ans;
-    }
-
-    template <size_t _Bits>
-    constexpr bitset<_Bits> operator^(const bitset<_Bits>& _Left, const bitset<_Bits>& _Right) noexcept {
-        bitset<_Bits> _Ans = _Left;
-        _Ans ^= _Right;
-        return _Ans;
-    }
-
-}  // namespace nstd
-
-template <size_t _Bits>
-struct std::hash<nstd::bitset<_Bits>> {
-    constexpr size_t operator()(const nstd::bitset<_Bits>& _BitSet) const noexcept {
-        // EXAMPLE ONLY
-        std::size_t result = 0;
-        for (size_t i = 0; i <= _BitSet._Words; ++i) {
-            result ^= _BitSet._Array[i];
-        }
-        return result;
-    }
-};
-
-template<size_t _Bits>
-using _BitSetClass = nstd::bitset<_Bits>;
-
-#else
+#if CPP_VERSION < 202002L  // c++20
 #error "A C++20 or newer is required"
 #endif
 
@@ -1173,17 +651,8 @@ namespace SigSearch
     // just inline for loop with const size N
     template <size_t N>
     ALWAYS_INLINE_PRE ALWAYS_INLINE_MID ALWAYS_INLINE_POST constexpr inline static void Repeat(auto f) {
-        [f] <auto... Index>(std::index_sequence<Index...>) {
+        [f] ALWAYS_INLINE_PRE <auto... Index>(std::index_sequence<Index...>)ALWAYS_INLINE_MID ALWAYS_INLINE_POST {
             (f. template operator() < Index > (), ...);
-        }(std::make_index_sequence<N>());
-    }
-
-    // inlining for cycle with const size N until first "return false" met
-    template <size_t N>
-    ALWAYS_INLINE_PRE ALWAYS_INLINE_MID ALWAYS_INLINE_POST constexpr inline static void RepeatUntilFalse(auto f) {
-        [f] <auto... Index>(std::index_sequence<Index...>) {
-            bool res = true;
-            ((res && (res = f.template operator() < Index > ())), ...);
         }(std::make_index_sequence<N>());
     }
 
@@ -1194,8 +663,23 @@ namespace SigSearch
         throw "Invalid hex digit";
     }
 
-    template<fixstr::basic_fixed_string Src>
-    consteval size_t get_sig_lenght() {
+    struct CmpOp {
+        size_t offset;
+        size_t size;
+        uint64_t value;
+    };
+
+    template<size_t PlanSize>
+    struct ComparisonSequence {
+        std::array<CmpOp, PlanSize> ops{};
+    };
+
+    template <fixstr::basic_fixed_string Src>
+    struct CompileTimeSignature
+    {
+
+private:
+    constexpr static size_t SignatureLenght = []() consteval {
         size_t count = 0;
         for (size_t i = 0; i < Src.size();) {
             if (Src[i] == ' ') { ++i; continue; }
@@ -1209,75 +693,172 @@ namespace SigSearch
             }
         }
         return count;
-    }
+        }();
 
-    template <fixstr::basic_fixed_string Src>
-    struct CompileTimeSignature {
-        static constexpr size_t N = get_sig_lenght<Src>();
-        constexpr static std::array<char, N> bytes = []() consteval {
-                size_t idx = 0;
-                std::array<char, N> temp;
-                for (size_t i = 0; i < Src.size();) {
-                    if (Src[i] == ' ') { ++i; continue; }
+    constexpr static std::array<std::pair<char, bool>, SignatureLenght> MaskedSignatureBytes = []() consteval {
+        std::array<std::pair<char, bool>, SignatureLenght> temp_sig;
+        size_t sig_len = 0;
+        for (size_t i = 0; i < Src.size();) {
+            if (Src[i] == ' ') { ++i; continue; }
 
-                    if (Src[i] == '?') {
-                        temp[idx] = 0;
-                        if (i + 1 < Src.size() && Src[i + 1] == '?') i += 2;
-                        else ++i;
-                    }
-                    else {
-                        unsigned high = hex_char_to_val(Src[i]);
-                        unsigned low = hex_char_to_val(Src[i + 1]);
-                        temp[idx] = static_cast<char>((high << 4) | low);
-                        i += 2;
-                    }
-                    ++idx;
-                }
-                return temp;
-            }();
-        constexpr static _BitSetClass<N> mask = []() consteval {
-                size_t idx = 0;
-                _BitSetClass<N> temp;
-                for (size_t i = 0; i < Src.size();) {
-                    if (Src[i] == ' ') { ++i; continue; }
+            if (Src[i] == '?') {
+                temp_sig[sig_len++] = { 0, true };
+                if (i + 1 < Src.size() && Src[i + 1] == '?') i += 2;
+                else ++i;
+            }
+            else {
+                unsigned high = hex_char_to_val(Src[i]);
+                unsigned low = hex_char_to_val(Src[i + 1]);
+                temp_sig[sig_len++] = { static_cast<char>((high << 4) | low), false };
+                i += 2;
+            }
+        }
+        return temp_sig;
+        }();
 
-                    if (Src[i] == '?') {
-                        temp[idx] = 0;
-                        if (i + 1 < Src.size() && Src[i + 1] == '?') i += 2;
-                        else ++i;
-                    }
-                    else {
-                        temp[idx] = 1;
-                        i += 2;
-                    }
-                    ++idx;
-                }
-                return temp;
-            }();
+    constexpr static size_t opCount = []() consteval {
+        size_t opId = 0;
+        size_t current_offset = 0;
 
-        static bool MatchAt(uintptr_t start) {
-            bool result = true;
-            RepeatUntilFalse<N>(ALWAYS_INLINE_PRE[&result, start]<size_t Index>() ALWAYS_INLINE_MID ALWAYS_INLINE_POST {
-                if constexpr (mask.test(Index)) {
-                    if (bytes[Index] != *reinterpret_cast<const char*>(start + Index)) {
-                        result = false;
-                        return false;
-                    }
+        while (current_offset < SignatureLenght) {
+            if (MaskedSignatureBytes[current_offset].second) {
+                current_offset++;
+                continue;
+            }
+
+            auto can_read = [&](size_t size) {
+                if (current_offset + size > SignatureLenght) return false;
+                for (size_t i = 0; i < size; ++i) {
+                    if (MaskedSignatureBytes[current_offset + i].second) return false;
                 }
                 return true;
-            });
-            return result;
+                };
+
+            auto read_int = [&](size_t size) {
+                uint64_t val = 0;
+                for (size_t i = 0; i < size; ++i) {
+                    val |= static_cast<uint64_t>(static_cast<unsigned char>(MaskedSignatureBytes[current_offset + i].first)) << (i * 8);
+                }
+                return val;
+                };
+
+            if (can_read(8)) {
+                opId++;
+                current_offset += 8;
+            }
+            else if (can_read(4)) {
+                opId++;
+                current_offset += 4;
+            }
+            else if (can_read(2)) {
+                opId++;
+                current_offset += 2;
+            }
+            else if(can_read(1)) {
+                opId++;
+                current_offset += 1;
+            }
+            else {
+                throw std::exception();
+            }
+        }
+        return opId;
+        }();
+
+    constexpr static ComparisonSequence<opCount> cmpSequence = []() consteval {
+        std::array<CmpOp, opCount> sequenceOps{};
+        size_t opId = 0;
+        size_t current_offset = 0;
+
+        auto can_read = [&](size_t size) {
+            if (current_offset + size > SignatureLenght) return false;
+            for (size_t i = 0; i < size; ++i) {
+                if (MaskedSignatureBytes[current_offset + i].second) return false;
+            }
+            return true;
+            };
+
+        auto read_int = [&](size_t size) {
+            uint64_t val = 0;
+            for (size_t i = 0; i < size; ++i) {
+                val |= static_cast<uint64_t>(static_cast<unsigned char>(MaskedSignatureBytes[current_offset + i].first)) << (i * 8);
+            }
+            return val;
+            };
+
+        while (current_offset < SignatureLenght) {
+            if (MaskedSignatureBytes[current_offset].second) {
+                current_offset++;
+                continue;
+            }
+
+            if (opId >= opCount) {
+                throw std::exception("shit");
+            }
+
+            if (can_read(8)) {
+                sequenceOps[opId++] = { current_offset, 8, read_int(8) };
+                current_offset += 8;
+            }
+            else if (can_read(4)) {
+                sequenceOps[opId++] = { current_offset, 4, read_int(4) };
+                current_offset += 4;
+            }
+            else if (can_read(2)) {
+                sequenceOps[opId++] = { current_offset, 2, read_int(2) };
+                current_offset += 2;
+            }
+            else if(can_read(1)) {
+                sequenceOps[opId++] = { current_offset, 1, read_int(1) };
+                current_offset += 1;
+            }
+            else {
+                throw std::exception();
+            }
         }
 
-        static constexpr size_t size() noexcept { return N; }
+        return ComparisonSequence<opCount>{ sequenceOps };
+        }();
+
+    template <const CmpOp& op>
+    static inline bool do_compare(uintptr_t start) {
+        const auto ptr = start + op.offset;
+
+        if constexpr (op.size == 8) {
+            return *reinterpret_cast<const uint64_t*>(ptr) == op.value;
+        }
+        else if constexpr (op.size == 4) {
+            return *reinterpret_cast<const uint32_t*>(ptr) == static_cast<uint32_t>(op.value);
+        }
+        else if constexpr (op.size == 2) {
+            return *reinterpret_cast<const uint16_t*>(ptr) == static_cast<uint16_t>(op.value);
+        }
+        else { // op.size == 1
+            return *reinterpret_cast<const uint8_t*>(ptr) == static_cast<uint8_t>(op.value);
+        }
+    }
+
+    template <size_t... Is>
+    static inline bool MatchAt(uintptr_t start, const std::index_sequence<Is...>)
+    {
+        return (do_compare<cmpSequence.ops[Is]>(start) && ...);
+    }
+
+public:
+
+    static constexpr size_t size() noexcept { return SignatureLenght; }
+
+        static inline bool MatchAt(uintptr_t start) {
+            return MatchAt(start, std::make_index_sequence<opCount>());
+        }
     };
 
     template <fixstr::basic_fixed_string Src>
     struct Signature {
-        bool MatchAt(uintptr_t start) const {
+        inline bool MatchAt(uintptr_t start) const {
             return CompileTimeSignature<Src>::MatchAt(start);
         }
-        size_t size() const noexcept {
+        const size_t size() const noexcept {
             return CompileTimeSignature<Src>::size();
         };
     };
@@ -1349,7 +930,7 @@ namespace SigSearch
 
         for (uintptr_t addr = start; addr < end; ++addr) {
             bool found_all = true;
-            Repeat<size>(ALWAYS_INLINE_PRE [&]<size_t Index>() ALWAYS_INLINE_MID ALWAYS_INLINE_POST {
+            Repeat<size>(ALWAYS_INLINE_PRE[&]<size_t Index>() ALWAYS_INLINE_MID ALWAYS_INLINE_POST {
                 if (results[Index] != 0) return;
 
                 found_all = false;
@@ -1362,7 +943,7 @@ namespace SigSearch
                     results[Index] = addr;
                 }
             });
-            
+
             if (found_all)
             {
                 break;

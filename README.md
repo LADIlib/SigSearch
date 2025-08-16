@@ -3,39 +3,13 @@
 ## English
 
 ### What this is
-A small, header-only C++ utility for compile-time-friendly byte-signature matching. It parses signatures written as hex strings with optional wildcards (like `"48 8B ?? 89"`) at compile time and produces a lightweight `Signature` object that can be matched against memory ranges at runtime.
+A small, header-only C++ utility for compile-time-friendly byte-signature matching. It parses signatures written as hex strings with optional wildcards (like `"48 8B ?? 89"`) at compile time and produces a 0-weight `Signature<...>` object that can be matched against memory ranges at runtime.
 
 This is not a framework — just a single header that implements:
-- a tiny `fixed_string`-like compile-time string (taken/ported from existing ideas),
-- a compile-time signature parser that turns a textual pattern into a byte array and a mask,
+- a tiny `fixed_string`-like compile-time string (taken from existing ideas),
+- a compile-time signature parser that turns a text pattern into a comparation sequences,
 - helper functions to scan address ranges: `FindSignatureInRange`, `FindAnyInRange`, and `FindAllInRange`,
 - a user literal `"..."_sig` so you can write signatures inline.
-
-For example
-```cpp
-using namespace SigSearch::literals;
-static char sig[] = { 0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x10 };
-int main()
-{
-    printf("%llx", SigSearch::FindSignatureInRange((uintptr_t)sig, (uintptr_t)sig+sizeof(sig), "03 ?? 05"_sig));
-}
-```
-this can be compiled into
-```cpp
-  char *v3; // rdx
-
-  v3 = sig;
-  while ( *v3 != 3 || v3[2] != 5 )
-  {
-    if ( ++v3 >= &sig[7] )
-    {
-      v3 = 0;
-      break;
-    }
-  }
-  printf("%llx", v3);
-```
-when decompiling in IDA
 
 ### What’s the difference?
 In other implementations of similar libraries, there are often several problems:
@@ -49,12 +23,43 @@ Summing up the above issues: for a large number of signatures and a wide search 
 In this implementation, these problems are solved. Key features:
 - Signatures are parsed at compile time and do not allocate memory (neither dynamic nor static)
 - You can search for a single signature, any one of several, or all of them at once
-- Thanks to compile-time signature parsing, it is possible to unroll the second `for` loop for signature comparison. Instead of a loop, a block of `if()` statements will be compiled, which significantly reduces the number of CPU instructions and RAM access needed to compare memory and signatures.
+- Thanks to compile-time signature parsing, it is possible to unroll the second `for` loop for signature comparison. Instead of a loop, a block of vectorized `if()` statements will be compiled, which significantly reduces the number of CPU instructions and RAM access needed to compare memory and signature bytes.
 
 Combined with the above advantages, searching for multiple signatures at once will be extremely fast (`SigSearch::FindAllInRange`).
 
+For example
+```cpp
+using namespace SigSearch::literals;
+static char sig[] = { 0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x10 };
+int main()
+{
+    auto signature = "01 02 03 04 ?? 06 07 08"_sig;
+
+    auto found = SigSearch::FindSignatureInRange((uintptr_t)sig, (uintptr_t)sig + sizeof(sig) + 1, signature);
+
+    printf("%llx", found);
+}
+```
+this can be compiled into
+```cpp
+  char *v3; // rdx
+
+  v3 = sig;
+  // vectorized and inlined
+  while ( *(_DWORD *)v3 != 0x04030201 || *(_WORD *)(v3 + 5) != 0x0706 || v3[7] != 8 )
+  {
+    if ( ++v3 >= &sig[3] )
+    {
+      v3 = 0;
+      break;
+    }
+  }
+  printf("%llx", v3);
+```
+when decompiling in IDA
+
 ### Requirements
-- C++20 or newer. If you compile with C++23 and the standard `std::bitset` is available, the header uses it; otherwise it contains a lightweight bitset implementation.
+- C++20 or newer.
 
 ### Quick usage examples
 ```cpp
@@ -95,7 +100,6 @@ int main() {
 
 ### Attribution
 Uses concepts from:
-- https://github.com/neargye-wg21/bitset-constexpr-proposal
 - https://github.com/unterumarmung/fixed_string
 
 ---
@@ -104,32 +108,6 @@ Uses concepts from:
 
 ### Что это такое
 Небольшая заголовочная библиотека на C++, которая позволяет описывать сигнатуры в виде hex-строк с `?`-джокером и получать объект сигнатуры на этапе компиляции, а затем искать совпадения в памяти во время выполнения.
-
-К примеру
-```cpp
-using namespace SigSearch::literals;
-static char sig[] = { 0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x10 };
-int main()
-{
-    printf("%llx", SigSearch::FindSignatureInRange((uintptr_t)sig, (uintptr_t)sig+sizeof(sig), "03 ?? 05"_sig));
-}
-```
-это скомпилируется в такой код
-```cpp
-  char *v3; // rdx
-
-  v3 = sig;
-  while ( *v3 != 3 || v3[2] != 5 )
-  {
-    if ( ++v3 >= &sig[7] )
-    {
-      v3 = 0;
-      break;
-    }
-  }
-  printf("%llx", v3);
-```
-при декомпиляции в IDA
 
 ### В чем отличия?
 В других реализациях подобных библиотек зачастую есть несколько проблем:
@@ -144,9 +122,40 @@ int main()
 В этой библиотеке эти проблемы решены, ключевые особенности:
 - сигнатура парсится во время компиляции и не выделяет память (ни динамическую, ни статическую)
 - есть возможность искать как одну сигнатуру, так и одну из нескольких, так и сразу несколько
-- за счет парсинга сигнатур во время компиляции - появилась возможность развернуть второй цикл `for` для сравнения сигнатур, вместо цикла будет компилироваться блок `if()`, что существенно снижет количество команд для процессора и доступа к памяти для сравнения памяти и сигнатур
+- за счет парсинга сигнатур во время компиляции - появилась возможность развернуть второй цикл `for` для сравнения сигнатур, вместо цикла будет компилироваться блок векторизированных `if()`, что существенно снижет количество команд для процессора и доступа к памяти для сравнения памяти и сигнатур
 
 В купе с вышеперечисленными преимуществами поиск сразу нескольких сигнатур одновременно будет крайне быстрым (`SigSearch::FindAllInRange`)
+
+К примеру
+```cpp
+using namespace SigSearch::literals;
+static char sig[] = { 0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x10 };
+int main()
+{
+    auto signature = "01 02 03 04 ?? 06 07 08"_sig;
+
+    auto found = SigSearch::FindSignatureInRange((uintptr_t)sig, (uintptr_t)sig + sizeof(sig) + 1, signature);
+
+    printf("%llx", found);
+}
+```
+это скомпилируется в такой код
+```cpp
+  char *v3; // rdx
+
+  v3 = sig;
+  // vectorized and inlined
+  while ( *(_DWORD *)v3 != 0x04030201 || *(_WORD *)(v3 + 5) != 0x0706 || v3[7] != 8 )
+  {
+    if ( ++v3 >= &sig[3] )
+    {
+      v3 = 0;
+      break;
+    }
+  }
+  printf("%llx", v3);
+```
+при декомпиляции в IDA
 
 ### Требования
 - Компилятор с поддержкой C++20 или новее.
@@ -190,5 +199,4 @@ int main() {
 
 ### Авторство
 Использованы идеи из:
-- https://github.com/neargye-wg21/bitset-constexpr-proposal
 - https://github.com/unterumarmung/fixed_string
