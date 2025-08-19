@@ -90,17 +90,16 @@ int main() {
 - `Signature<"..">` / `".."_sig` — compile-time signature object.
 - `Signature::MatchAt(uintptr_t addr)` — check if signature matches at address.
 - `FindSignatureInRange(uintptr_t start,uintptr_t end,sig)` — returns first address or 0.
+- `FindSignatureInRangeAligned(uintptr_t start,uintptr_t end, size_t alignment, sig)` — returns first address or 0 with aligned address(useful for searching in aligned data, .rdata for example).
 - `FindAnyInRange(uintptr_t start,uintptr_t end, sig1,sig2,...)` — returns first address where any of signatures match.
+- `FindAnyInRangeAligned(uintptr_t start,uintptr_t end, size_t alignment, sig1,sig2,...)` — returns first address where any of signatures match with aligned address.
 - `FindAllInRange(uintptr_t start,uintptr_t end, sig1,sig2,...)` — returns `std::array<uintptr_t, N>` with found addresses (0 if not found).
+- `FindAllInRangeAligned(uintptr_t start,uintptr_t end, size_t alignment, sig1,sig2,...)` — returns `std::array<uintptr_t, N>` with found addresses (0 if not found) with aligned address.
 
 ### Notes & limitations
 - The header works on raw memory reads; ensure you have permission to read the memory range.
 - Byte order must match memory layout.
 - Requires a modern compiler.
-
-### Attribution
-Uses concepts from:
-- https://github.com/unterumarmung/fixed_string
 
 ---
 
@@ -189,14 +188,13 @@ int main() {
 - `Signature<"..">` / `".."_sig` — сигнатура, создаваемая на этапе компиляции.
 - `Signature::MatchAt(uintptr_t addr)` — проверить совпадение по адресу.
 - `FindSignatureInRange(uintptr_t start,uintptr_t end, sig)` — первый адрес совпадения или 0.
+- `FindSignatureInRangeAlinged(uintptr_t start,uintptr_t end, size_t alignment, sig)` — первый адрес совпадения или 0 с кастомным смещением(полезно для выровненных данных).
 - `FindAnyInRange(uintptr_t start,uintptr_t end, sig1,sig2,...)` — первый адрес совпадения для любой сигнатуры.
+- `FindAnyInRangeAligned(uintptr_t start,uintptr_t end, size_t alignment, sig1,sig2,...)` — первый адрес совпадения для любой сигнатуры с кастомным смещением.
 - `FindAllInRange(uintptr_t start,uintptr_t end, sig1,sig2,...)` — массив адресов совпадений.
+- `FindAllInRangeAligned(uintptr_t start,uintptr_t end, size_t alignment, sig1,sig2,...)` — массив адресов совпадений с кастомным смещением.
 
 ### Ограничения
 - Чтение памяти напрямую, требуется доступ к диапазону.
 - Байты в сигнатуре должны соответствовать порядку в памяти.
 - Требуется современный компилятор.
-
-### Авторство
-Использованы идеи из:
-- https://github.com/unterumarmung/fixed_string
